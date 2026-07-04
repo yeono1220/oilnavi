@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+oil_raw.csv
+.DS_Store
+.ipynb_checkpoints/
+*.pdf
