@@ -1,48 +1,43 @@
 """
-forecast.py - 실제 데이터 로더에 연결된 유가 예측 파이프라인
-사용법: python forecast.py  (oil_raw.csv 있으면 실데이터, 없으면 시뮬레이션)
+forecast.py - 인천 경유 실데이터 기반 다음달 가격 예측
+사용법: python forecast.py
 """
-import numpy as np, pandas as pd
+import numpy as np
 import matplotlib; matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+import matplotlib.font_manager as fm
 from sklearn.linear_model import LinearRegression
-from sklearn.metrics import mean_absolute_error, mean_absolute_percentage_error
 from data_loader import load_prices
 
+# 한글 폰트
+for fp in ["/usr/share/fonts/truetype/nanum/NanumGothic.ttf"]:
+    try:
+        fm.fontManager.addfont(fp); plt.rcParams['font.family']='NanumGothic'
+    except: pass
 plt.rcParams["axes.unicode_minus"] = False
-HORIZON = 14
 
-# --- 1) 데이터 로드 (실제 or 시뮬레이션 자동) ---
-df = load_prices("dubai")
+labels, prices = load_prices()
+prices = np.array(prices); n = len(prices)
 
-# --- 2) 피처 엔지니어링 ---
-for lag in [1,3,7,14,30]: df[f"lag_{lag}"] = df["price"].shift(lag)
-for w in [7,14,30]:
-    df[f"ma_{w}"] = df["price"].shift(1).rolling(w).mean()
-    df[f"std_{w}"] = df["price"].shift(1).rolling(w).std()
-df["mom_7"] = df["price"].shift(1) - df["price"].shift(8)
-df["target"] = df["price"].shift(-HORIZON)
-d = df.dropna().reset_index(drop=True)
+# 다음달 예측: 최근 3개월 선형 추세
+x = np.arange(n).reshape(-1,1)
+model = LinearRegression().fit(x[-3:], prices[-3:])
+next_pred = model.predict([[n]])[0]
 
-feat = [c for c in d.columns if c.startswith(("lag_","ma_","std_","mom_"))]
-X, y, now = d[feat].values, d["target"].values, d["price"].values
-sp = int(len(d)*0.8)
+change = (next_pred/prices[-1]-1)*100
+print(f"\n[예측] 다음달 경유가: {next_pred:.0f}원 ({change:+.1f}%)")
+print(f"[급등] 최근 2개월: {prices[-3]:.0f} → {prices[-1]:.0f}원 (+{(prices[-1]/prices[-3]-1)*100:.1f}%)")
 
-# --- 3) 학습 + 평가 ---
-m = LinearRegression().fit(X[:sp], y[:sp])
-pred = m.predict(X[sp:])
-yte, now_te = y[sp:], now[sp:]
-mae = mean_absolute_error(yte, pred)
-mape = mean_absolute_percentage_error(yte, pred)*100
-da = ((yte>now_te)==(pred>now_te)).mean()*100
-print(f"\n[예측 성능]  MAE ${mae:.2f} | MAPE {mape:.2f}% | 방향적중 {da:.1f}%")
-
-# --- 4) 시각화 ---
-dates_te = d["date"].iloc[sp:].values
-plt.figure(figsize=(12,4.5))
-plt.plot(dates_te, yte, color="#12130f", lw=1.5, label="Actual (14d later)")
-plt.plot(dates_te, pred, color="#c1361c", lw=1.4, ls="--", label="Predicted")
-plt.title("Oil Price Forecast (14-day ahead)", weight="bold")
-plt.ylabel("Price ($/barrel)"); plt.legend(); plt.grid(alpha=.25)
-plt.tight_layout(); plt.savefig("forecast_result.png", dpi=120)
+# 시각화
+short = [l.replace('년','.').replace('월','') for l in labels]
+plt.figure(figsize=(11,4.5))
+plt.plot(range(n), prices, marker='o', color='#12130f', lw=2, label='실제 (한국석유공사)')
+plt.plot([n-1,n], [prices[-1],next_pred], marker='o', color='#c1361c', lw=2, ls='--', label='다음달 예측')
+plt.annotate('최근 2개월 급등', xy=(n-2, prices[-2]), xytext=(n-5, prices[-1]),
+             fontsize=11, color='#c1361c', weight='bold',
+             arrowprops=dict(arrowstyle='->', color='#c1361c'))
+plt.xticks(list(range(n))+[n], short+['26.5'], rotation=45, fontsize=9)
+plt.ylabel('경유 가격 (원/L)'); plt.title('인천지역 경유가격 추이와 다음달 예측', weight='bold')
+plt.legend(); plt.grid(alpha=.25); plt.tight_layout()
+plt.savefig('forecast_result.png', dpi=120)
 print("그래프 저장: forecast_result.png")
